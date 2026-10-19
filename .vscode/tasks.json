@@ -1,0 +1,54 @@
+{
+  // Cmd+Shift+B (Ctrl+Shift+B on Windows) shows these. See tools/README.md.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run on UNO Q",
+      "detail": "Deploy and start the app the open file belongs to",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["tools/deploy.py", "${relativeFile}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": false },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Python in UNO Q container",
+      "detail": "Python prompt in the running app, or on the board",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["tools/deploy.py", "--python"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Terminal on UNO Q",
+      "detail": "A command-line session on the board (type exit to leave)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["tools/deploy.py", "--shell"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Advertise UNO Q on Tufts WiFi",
+      "detail": "Runs tools/Tufts_WiFi.py (Ctrl+C to stop)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["tools/Tufts_WiFi.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "focus": true },
+      "problemMatcher": []
+    }
+  ]
+}
