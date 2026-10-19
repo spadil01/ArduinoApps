@@ -2,7 +2,7 @@
 #
 #   sketch.ino  -> Bridge "distance" (rear ultrasonic, cm) -> this file
 #   laptop      -> MQTT "sumo/lego"   (light sensor colour + joysticks) -> this file
-#   this file   -> behavior tree (behavior_tree.py) -> MQTT "sumo/drive" -> laptop -> LEGO motors
+#   this file   -> behavior tree (behavior_tree.py) -> MQTT "sumo/drive" (wheels + ramp) -> laptop -> LEGO motors
 #   this file   -> MQTT "sumo/status" (human-readable messages)
 #
 # The laptop also runs the MQTT broker (mosquitto). If its IP changes, update
@@ -62,12 +62,14 @@ def control_loop():
             if bb.now - distance_time > DISTANCE_STALE_S:
                 bb.distance_cm = -1
             tree.tick(bb)
-            left, right, behavior = bb.left, bb.right, bb.behavior
+            left, right, behavior, ramp = bb.left, bb.right, bb.behavior, bb.ramp_up
         # Send changes at once; otherwise a steady reminder at LOOP_HZ is plenty.
         now = time.monotonic()
-        if (left, right, behavior) != last_sent or now - last_sent_time >= 1 / LOOP_HZ:
-            publish(DRIVE_TOPIC, json.dumps({"left": left, "right": right, "behavior": behavior}))
-            last_sent, last_sent_time = (left, right, behavior), now
+        state = (left, right, behavior, ramp)
+        if state != last_sent or now - last_sent_time >= 1 / LOOP_HZ:
+            publish(DRIVE_TOPIC, json.dumps({"left": left, "right": right,
+                                             "behavior": behavior, "ramp": "up" if ramp else "down"}))
+            last_sent, last_sent_time = state, now
         if behavior != last_behavior:
             print(f"-> {behavior}  ({left}, {right})")
             publish(STATUS_TOPIC, behavior)

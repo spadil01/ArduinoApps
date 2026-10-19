@@ -152,8 +152,10 @@ def test_one_stick_spins_in_place():
     assert (left, right) == (-bt.TURN_MAX, bt.TURN_MAX)
     left, right, _ = tick(make(left=0, right=100))   # right stick up -> spin right
     assert (left, right) == (bt.TURN_MAX, -bt.TURN_MAX)
-    left, right, _ = tick(make(left=-100, right=0))  # left stick down -> spin right
-    assert (left, right) == (bt.TURN_MAX, -bt.TURN_MAX)
+    left, right, _ = tick(make(left=-100, right=0))  # left stick down alone -> no driving
+    assert (left, right) == (0, 0)
+    left, right, _ = tick(make(left=0, right=-100))  # right stick down alone -> no driving
+    assert (left, right) == (0, 0)
     left, right, _ = tick(make(left=50, right=0))    # half push -> half speed spin
     assert left == -right and 0 < right < bt.TURN_MAX
 
@@ -215,3 +217,25 @@ def test_up_and_down_curves_forward_toward_the_down_side():
     assert left > right > 0
     left, right, _ = tick(make(left=-100, right=100))  # left stick down -> curve left
     assert right > left > 0
+
+
+def ramp(left, right, **kw):
+    bb = make(left=left, right=right, **kw)
+    tick(bb)
+    return bb.ramp_up
+
+
+def test_ramp_up_only_while_left_stick_alone_is_down():
+    assert ramp(-100, 0)                 # left down alone -> up
+    assert not ramp(0, 0)                # centered -> down
+    assert not ramp(-100, -100)          # both down = reverse, ramp stays down
+    assert not ramp(-100, 100)           # left down + right up = curve, ramp stays down
+    assert not ramp(0, -100)             # right down alone -> down
+
+
+def test_ramp_stays_down_when_asleep_or_no_data():
+    bb = make(left=-100, right=0)
+    bb.awake = False
+    tick(bb)
+    assert not bb.ramp_up
+    assert not ramp(-100, 0, fresh=False)

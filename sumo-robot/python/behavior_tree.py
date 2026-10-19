@@ -5,6 +5,7 @@
 # yes picks the wheel speeds and the rest are skipped:
 #
 #   Selector (first one that succeeds wins)
+#   |-- (always) ramp up while only the left stick is down, else down
 #   |-- No fresh LEGO data?          -> STOP          (safety)
 #   |-- Not started yet?             -> ASLEEP        (wake: both sticks down 1 s, let go)
 #   |-- Backed out of the ring?      -> LOST          (stop, back to sleep; laptop plays a song)
@@ -66,6 +67,7 @@ class Blackboard:
         self.opponent_time = -1e9  # when the opponent was last seen behind us
         self.close_count = 0       # close ultrasonic readings in a row
         self.awake = False         # False until the wake-up stick signal
+        self.ramp_up = False       # output: raise the ramp (Single Motor)
         # outputs
         self.left = 0
         self.right = 0
@@ -274,9 +276,9 @@ def forward_and_turn(bb):
     """Turn the sticks into (forward, turn); wheels = forward +/- turn, and a
     positive turn means clockwise (to the right).
       both sticks up / both down   -> straight forward / backward
-      only one stick               -> spin on the spot toward that stick's side
-                                      (left up = spin left, right up = spin right;
-                                      pushing it down spins the other way)
+      only one stick, pushed up    -> spin on the spot toward that stick's side
+                                      (left up = spin left, right up = spin right)
+      only one stick, pulled down  -> nothing (left down alone raises the ramp)
       one up, the other down       -> curve FORWARD toward the down stick's side
                                       (left up + right down = forward arc to the right)
     Scaled down to DRIVE_MAX / TURN_MAX so the wheels grip."""
@@ -288,8 +290,9 @@ def forward_and_turn(bb):
         inner = outer * CURVE_INNER
         toward_right = right < 0
         return (outer + inner) / 2, (outer - inner) / 2 * (1 if toward_right else -1)
-    # only one stick (or none)
-    spin = right - left  # right stick up -> +, left stick up -> -
+    # Only one stick: spin toward it if it's UP. A stick pulled down on its own
+    # doesn't drive (left down alone = ramp up, see ramp_control).
+    spin = max(right, 0) - max(left, 0)  # right stick up -> +, left stick up -> -
     return 0, spin * TURN_MAX / 100
 
 
@@ -306,8 +309,18 @@ def follow_controller(bb):
     bb.drive(forward + turn, forward - turn, "controller" if moving else "idle")
 
 
+def ramp_control(bb):
+    """Ramp is up only while the left stick alone is pulled down, the robot is
+    awake and the LEGO data is fresh. Always FAILS so the tree carries on to
+    pick the wheel speeds."""
+    left, right = sticks(bb)
+    bb.ramp_up = bb.awake and not lego_data_stale(bb) and left < 0 and right == 0
+    return FAILURE
+
+
 def build_tree():
     return Selector(
+        Action(ramp_control),
         Sequence(Condition(lego_data_stale), Action(stop)),
         WaitForStart(),
         OutOfRing(),
