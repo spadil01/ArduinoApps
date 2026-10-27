@@ -8,6 +8,7 @@
 #   |-- (always) ramp up while only the left stick is down, else down
 #   |-- No fresh LEGO data?          -> STOP          (safety)
 #   |-- Not started yet?             -> ASLEEP        (wake: both sticks down 1 s, let go)
+#   |-- Driver says we lost?         -> LOST          (right stick alone held down 1 s)
 #   |-- Backed out of the ring?      -> LOST          (stop, back to sleep; laptop plays a song)
 #   |-- Blue edge seen / escaping?   -> ESCAPE        (back up, then spin; ignores controller)
 #   |-- Opponent close behind?       -> FLEE FORWARD  (+ the controller's turning, never backwards)
@@ -44,6 +45,8 @@ LEGO_STALE_S = 0.5         # no LEGO data for this long -> stop
 WAKE_STICK = -90           # both sticks below this (pulled down) = wake-up signal
 WAKE_HOLD_S = 1.0          # ... held this long, then let go
 SLEEP_AFTER_LOST_S = 3.0   # laptop gone this long -> back to sleep
+GIVE_UP_STICK = -90        # right stick alone below this (pulled down) ...
+GIVE_UP_HOLD_S = 1.0       # ... held this long = driver declares we lost (e.g. robot flipped)
 BACKWARD_MIN = 20          # wheels' sum below -this = clearly backing up (not spinning)
 RECENT_TAPE_S = 1.5        # tape seen this recently -> backing onto it is part of an escape, not 'out'
 
@@ -199,6 +202,29 @@ class WaitForStart:
         return RUNNING
 
 
+class DriverGivesUp:
+    """The driver can declare the match lost (e.g. the robot flipped over and
+    the light sensor will never see the tape): hold the right stick alone all
+    the way down for GIVE_UP_HOLD_S."""
+
+    def __init__(self):
+        self.held_since = None
+
+    def tick(self, bb):
+        left, right = sticks(bb)
+        if not (bb.awake and left == 0 and bb.stick_right <= GIVE_UP_STICK):
+            self.held_since = None
+            return FAILURE
+        if self.held_since is None:
+            self.held_since = bb.now
+        if bb.now - self.held_since < GIVE_UP_HOLD_S:
+            return FAILURE  # not long enough yet; keep driving as normal
+        self.held_since = None
+        bb.awake = False
+        bb.drive(0, 0, "lost: driver gave up")
+        return RUNNING
+
+
 class OutOfRing:
     """Notice when the robot has gone fully out of the ring.
 
@@ -323,6 +349,7 @@ def build_tree():
         Action(ramp_control),
         Sequence(Condition(lego_data_stale), Action(stop)),
         WaitForStart(),
+        DriverGivesUp(),
         OutOfRing(),
         Escape(),
         Sequence(Condition(opponent_behind), Action(flee_forward)),

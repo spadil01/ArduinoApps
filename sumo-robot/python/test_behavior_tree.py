@@ -239,3 +239,25 @@ def test_ramp_stays_down_when_asleep_or_no_data():
     tick(bb)
     assert not bb.ramp_up
     assert not ramp(-100, 0, fresh=False)
+
+
+def test_right_stick_down_held_1s_declares_lost():
+    tree, bb = bt.build_tree(), make()
+    for t in (10.0, 10.5, 10.9):
+        bb.now = bb.lego_time = t
+        bb.stick_left, bb.stick_right = 0, -100
+        tick(bb, tree)
+        assert bb.awake  # not yet
+    bb.now = bb.lego_time = 11.05
+    assert tick(bb, tree) == (0, 0, "lost: driver gave up") and not bb.awake
+
+
+def test_short_right_stick_down_or_reversing_does_not_declare_lost():
+    tree, bb = bt.build_tree(), make()
+    steps = [(10.0, 0, -100), (10.3, 0, 0),                     # brief tap
+             (11.0, 0, -100), (11.1, -100, -100), (12.5, -100, -100)]  # right first, then both = reverse
+    for t, l, r in steps:
+        bb.now = bb.lego_time = t
+        bb.stick_left, bb.stick_right = l, r
+        tick(bb, tree)
+    assert bb.awake and bb.behavior == "controller"
