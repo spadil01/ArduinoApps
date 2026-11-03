@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14161a" media="(prefers-color-scheme: dark)">
+  <title>Step Counter</title>
+  <!-- The results page: served by the board (python/main.py, port 7000) so any
+       laptop or phone on the same Wi-Fi can open http://<board address>:7000.
+       Counts come over the same WebSocket as the training page (port 8765). -->
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #fff; --text: #16181d; --muted: #6b7280; --line: #e5e7eb;
+      --accent: #2a7de1; --good: #16a34a; --bad: #dc2626;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14161a; --card: #1d2026; --text: #f2f3f5; --muted: #9aa1ad; --line: #2c3038;
+              --accent: #5aa0f2; --good: #22c55e; --bad: #f87171; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    }
+    header { width: 100%; max-width: 560px; display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.1rem; margin: 0; }
+    .conn { display: flex; align-items: center; gap: 6px; font-size: .85rem; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
+    .dot.on { background: var(--good); }
+    main { width: 100%; max-width: 560px; display: grid; gap: 16px; margin-top: 20px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 22px 20px; text-align: center; }
+    .label { font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .big { font-size: clamp(4.5rem, 22vw, 8rem); font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+    .mid { font-size: clamp(2.8rem, 13vw, 4.5rem); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .unit { font-size: .4em; font-weight: 600; color: var(--muted); margin-left: 4px; }
+    .pm { font-size: 1.25rem; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .range { font-size: .9rem; color: var(--muted); margin-top: 4px; }
+    button {
+      font: inherit; font-size: 1.05rem; font-weight: 600; padding: 14px; border-radius: 14px;
+      border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer;
+    }
+    button:active { transform: scale(.98); }
+    .row { display: flex; justify-content: space-between; color: var(--muted); font-size: .9rem; }
+    .note { color: var(--muted); font-size: .8rem; line-height: 1.45; text-align: center; margin: 4px 8px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>👣 Step Counter</h1>
+    <div class="conn"><span id="dot" class="dot"></span><span id="conn">Connecting…</span></div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="label">Steps</div>
+      <div class="big" id="steps">–</div>
+      <div class="pm" id="steps-pm">&nbsp;</div>
+      <div class="range" id="steps-range">&nbsp;</div>
+    </section>
+
+    <section class="card">
+      <div class="label">Distance walked</div>
+      <div class="mid"><span id="meters">–</span><span class="unit">m</span></div>
+      <div class="pm" id="meters-pm">&nbsp;</div>
+      <div class="range" id="meters-range">&nbsp;</div>
+    </section>
+
+    <div class="row"><span id="elapsed">&nbsp;</span><span id="sensor">&nbsp;</span></div>
+    <button id="reset">Start over</button>
+    <p class="note" id="note"></p>
+  </main>
+
+  <script>
+    const PORT = 8765;
+    const $ = (id) => document.getElementById(id);
+    // Opened from the board: talk back to it. Opened as a file: ?board=<address>.
+    const host = location.hostname || new URLSearchParams(location.search).get("board") || "";
+    let ws = null;
+    let since = null;        // when counting started (this device's clock)
+    let lastReading = 0;     // when the last sensor reading arrived
+
+    function connect() {
+      if (!host) return status(false, "Add ?board=<address> to the link");
+      ws = new WebSocket(`ws://${host}:${PORT}`);
+      ws.onopen = () => {
+        status(true, "Connected");
+        ws.send(JSON.stringify({ type: "counts_only" }));  // skip the 100 sensor readings a second
+      };
+      ws.onclose = () => { status(false, "Reconnecting…"); setTimeout(connect, 2000); };
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "count") show(msg);
+        else if (msg.type === "sensor" && msg.rate > 0) lastReading = Date.now();
+      };
+    }
+
+    function status(on, text) {
+      $("dot").classList.toggle("on", on);
+      $("conn").textContent = text;
+    }
+
+    function show(c) {
+      $("steps").textContent = c.steps;
+      $("steps-pm").textContent = `± ${c.steps_pm} steps`;
+      $("steps-range").textContent = `probably between ${Math.max(0, c.steps - c.steps_pm)} and ${c.steps + c.steps_pm}`;
+      $("meters").textContent = c.meters.toFixed(1);
+      $("meters-pm").textContent = `± ${c.meters_pm.toFixed(1)} m`;
+      $("meters-range").textContent =
+        `probably between ${Math.max(0, c.meters - c.meters_pm).toFixed(1)} and ${(c.meters + c.meters_pm).toFixed(1)} m`;
+      $("note").textContent =
+        `The ± comes from testing the network on walks it never saw: it was off by ${c.steps_pct}% on average. ` +
+        `Distance = steps × ${c.step_m} m per step, which adds more doubt (± ${c.meters_pct}% in all). ` +
+        `Turning steps count as forward steps, so lots of turns make the distance read high.`;
+      since = Date.now() - c.seconds * 1000;
+    }
+
+    function tick() {
+      if (since !== null) {
+        const s = Math.floor((Date.now() - since) / 1000);
+        $("elapsed").textContent = `Counting for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      }
+      const live = Date.now() - lastReading < 2500;  // "sensor" notes come once a second
+      $("sensor").textContent = ws && ws.readyState === WebSocket.OPEN ? (live ? "Sensor live" : "No sensor readings") : "";
+    }
+
+    $("reset").onclick = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
+    };
+
+    connect();
+    setInterval(tick, 500);
+  </script>
+</body>
+</html>
