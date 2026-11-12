@@ -1,0 +1,1 @@
+# Nothing extra: the board already has NumPy and OpenCV.
