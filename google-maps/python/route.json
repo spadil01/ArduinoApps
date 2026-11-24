@@ -1,0 +1,26 @@
+{
+  "name": "Burden Lounge → NOLOP",
+  "start": "Burden Lounge",
+  "dest": "NOLOP",
+  "start_hint": "Stand in the hallway next to the Burden Lounge door, with the door on your right. Face down the hallway.",
+  "legs": [
+    {"kind": "walk",   "m": 24.8, "floor": 0,
+     "end": {"id": "left_turn_1",       "type": "turn",         "dir": "left", "label": "Left turn 1"}},
+    {"kind": "walk",   "m": 1.95, "floor": 0,
+     "end": {"id": "stairs_down_start", "type": "stairs_start", "dir": "down", "label": "Stairs down start"}},
+    {"kind": "stairs", "m": 8.0,  "floor": 0, "dir": "down", "steps": 24,
+     "end": {"id": "stairs_down_end",   "type": "stairs_end",   "dir": "down", "label": "Stairs down end"}},
+    {"kind": "walk",   "m": 0.65, "floor": -1,
+     "end": {"id": "left_turn_2",       "type": "turn",         "dir": "left", "label": "Left turn 2"}},
+    {"kind": "walk",   "m": 1.9,  "floor": -1,
+     "end": {"id": "left_turn_3",       "type": "turn",         "dir": "left", "label": "Left turn 3"}},
+    {"kind": "walk",   "m": 10.0, "floor": -1,
+     "end": {"id": "left_turn_4",       "type": "turn",         "dir": "left", "label": "Left turn 4"}},
+    {"kind": "walk",   "m": 1.18, "floor": -1,
+     "end": {"id": "stairs_up_start",   "type": "stairs_start", "dir": "up",   "label": "Stairs up start"}},
+    {"kind": "stairs", "m": 1.1,  "floor": -1, "dir": "up", "steps": 4,
+     "end": {"id": "stairs_up_end",     "type": "stairs_end",   "dir": "up",   "label": "Stairs up end"}},
+    {"kind": "walk",   "m": 3.8,  "floor": -1,
+     "end": {"id": "arrived",           "type": "arrive",       "dir": "",     "label": "NOLOP"}}
+  ]
+}

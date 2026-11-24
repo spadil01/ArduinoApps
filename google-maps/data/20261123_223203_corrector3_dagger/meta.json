@@ -1,0 +1,82 @@
+{
+  "walk_id": "20261123_223203_corrector3_dagger",
+  "route": "Burden Lounge \u2192 NOLOP",
+  "role": "corrector",
+  "corrector": 3,
+  "dagger": true,
+  "height_cm": 178,
+  "step_m_guess": 0.641,
+  "started": 1795473123.5635774,
+  "model": "model.json",
+  "gyro_bias": [
+    1.8926717644929887,
+    -0.6374045833013952,
+    -2.516488552093506
+  ],
+  "up": [
+    -0.048102649695138014,
+    -0.14442491032667926,
+    0.988345880939177
+  ],
+  "keep": true,
+  "ended": 1795473212.426647,
+  "dropouts": 0,
+  "n_corrections": 2,
+  "landmarks": [
+    [
+      1795473156065,
+      "left_turn_1",
+      "turn"
+    ],
+    [
+      1795473159853,
+      "stairs_down_start",
+      "reached by distance"
+    ],
+    [
+      1795473176431,
+      "stairs_down_end",
+      "skipped past"
+    ],
+    [
+      1795473176432,
+      "left_turn_2",
+      "turn"
+    ],
+    [
+      1795473180199,
+      "left_turn_3",
+      "turn"
+    ],
+    [
+      1795473198857,
+      "left_turn_4",
+      "turn"
+    ],
+    [
+      1795473202320,
+      "stairs_up_start",
+      "reached by distance"
+    ],
+    [
+      1795473205437,
+      "stairs_up_end",
+      "stairs counted"
+    ],
+    [
+      1795473210896,
+      "arrived",
+      "distance"
+    ]
+  ],
+  "final": {
+    "leg": 8,
+    "d": 3.8,
+    "progress_m": 53.4,
+    "total_m": 53.4,
+    "steps_to": 0,
+    "missed": false,
+    "at_end": true,
+    "step_m": 0.576
+  }
+}

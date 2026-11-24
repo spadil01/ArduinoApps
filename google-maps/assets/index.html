@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Burden Lounge → NOLOP</title>
+<script src="libs/socket.io.min.js"></script>
+<!--
+  Phone screen for the Burden Lounge → NOLOP walking guide.
+
+  Messages the phone SENDS to the board (python/main.py):
+    start   {role: "expert"|"corrector"|"new", corrector: 1.., dagger: true|false, height: cm}
+    tap     {idx}            Expert: landmark number idx just started (0 = Left turn 1 ...)
+    undo    {}               Expert: remove the last landmark tap
+    pause   {}               Pause / resume
+    correct {kind, value}    Corrector: kind "did" (what I really did) or "say" (what it should have said)
+    resync  {idx}            Corrector: "I'm at landmark idx"
+    stop    {keep}           End the walk; keep = save it for training or not
+    ping    {}               Once a second, so the board knows the phone is connected
+
+  Messages the phone RECEIVES:
+    hb     {imu_ok, imu_diag}                 once a second
+    route  {...route.json...}                 optional; replaces the built-in copy below
+    state  {status, role, corrector, dagger, leg, d, progress_m, total_m, steps_to,
+            expert_next, activity, paused, missed, at_end, say?, sub?, then?, toast?}
+           leg = which part of the route you're on (0..8), d = meters into that part.
+
+  Open this file straight from your computer (no board) to get a preview that fakes a walk.
+-->
+<style>
+  :root {
+    --blue:#1a73e8; --blue-dk:#174ea6; --blue-lt:#e8f0fe;
+    --green:#0f7a43; --green-dk:#0a5c32; --green-lt:#e6f4ea;
+    --red:#c5221f; --red-lt:#fce8e6;
+    --amber:#b06000; --amber-lt:#fef7e0;
+    --ink:#202124; --ink2:#5f6368; --line:#dadce0; --map:#eef0e9;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; }
+  body { font:15px/1.35 -apple-system, "SF Pro Text", Roboto, system-ui, sans-serif; color:var(--ink); background:var(--map); overscroll-behavior:none; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  #app { position:relative; display:flex; flex-direction:column; min-height:100vh; min-height:100dvh; max-width:560px; margin:0 auto; overflow-x:hidden; background:var(--map); }
+  .hide { display:none !important; }
+
+  /* ---------- top bar ---------- */
+  .top { flex:none; position:sticky; top:0; background:#fff; padding:calc(8px + env(safe-area-inset-top)) 14px 10px; display:flex; align-items:center; gap:8px; box-shadow:0 1px 3px rgba(60,64,67,.2); z-index:10; }
+  .route { flex:1; font-weight:700; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stack { display:flex; flex-direction:column; align-items:flex-end; gap:5px; }
+  .lights { display:flex; gap:6px; }
+  .chip { font-size:11px; font-weight:700; padding:4px 8px; border-radius:999px; border:1px solid var(--line); background:#fff; color:var(--ink2); white-space:nowrap; }
+  .chip.ok { border-color:#ceead6; background:var(--green-lt); color:#0b8043; }
+  .chip.bad { border-color:#f6c7c3; background:var(--red-lt); color:var(--red); }
+  .chip.warn { border-color:#fde293; background:var(--amber-lt); color:var(--amber); }
+  .chip.role { border-color:var(--blue-lt); background:var(--blue-lt); color:var(--blue-dk); }
+  #imuDiag { flex:none; background:var(--red-lt); color:var(--red); font-size:13px; font-weight:600; text-align:center; padding:7px 12px; z-index:9; }
+
+  /* ---------- setup ---------- */
+  #setup { flex:1; overflow:auto; background:#fff; padding:14px 14px calc(18px + env(safe-area-inset-bottom)); }
+  .face { border-radius:16px; overflow:hidden; border:1px solid var(--line); background:#fff; }
+  .face svg { display:block; width:100%; height:150px; }
+  .face .txt { padding:10px 12px; }
+  .small { font-size:12px; color:var(--ink2); }
+  .lbl { font-size:11px; font-weight:700; color:var(--ink2); letter-spacing:.05em; margin:14px 0 6px; }
+  .seg { display:flex; background:#f1f3f4; border-radius:12px; padding:3px; }
+  .seg button { flex:1; border:0; background:none; padding:9px 4px; border-radius:9px; font-weight:600; font-size:14px; color:var(--ink2); }
+  .seg button.on { background:#fff; color:var(--blue-dk); box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  .pills { display:flex; gap:6px; flex-wrap:wrap; }
+  .pills button { border:1px solid var(--line); background:#fff; border-radius:999px; min-width:44px; padding:7px 14px; font-weight:600; font-size:14px; }
+  .pills button.on { background:var(--blue-lt); border-color:var(--blue-lt); color:var(--blue-dk); }
+  .tog { display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; width:100%; background:#fff; text-align:left; }
+  .sw { flex:none; width:46px; height:28px; border-radius:14px; background:#bdc1c6; position:relative; transition:background .15s; }
+  .sw::after { content:""; position:absolute; left:3px; top:3px; width:22px; height:22px; border-radius:50%; background:#fff; transition:left .15s; }
+  .tog.on .sw { background:#0b8043; }
+  .tog.on .sw::after { left:21px; }
+  .inp { display:flex; align-items:center; border:1px solid var(--line); border-radius:12px; padding:0 12px; background:#f8f9fa; }
+  .inp input { flex:1; border:0; background:none; font-size:16px; padding:11px 0; outline:none; min-width:0; }
+  .err { color:var(--red); font-size:13px; min-height:18px; margin-top:6px; }
+  .pill { width:100%; border:0; border-radius:999px; padding:15px; font-size:17px; font-weight:700; background:var(--blue); color:#fff; }
+  .pill:active { background:var(--blue-dk); }
+
+  /* ---------- walking view ---------- */
+  #walk { position:relative; flex:1; display:flex; flex-direction:column; }
+  .card { position:absolute; left:10px; right:10px; top:10px; z-index:6; border-radius:16px; color:#fff; padding:12px 14px; display:flex; gap:12px; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,.25); background:var(--green); transition:background .2s; }
+  .card.b { background:var(--blue); } .card.grey { background:#5f6368; } .card.amber { background:var(--amber); } .card.red { background:var(--red); }
+  .card .ar { flex:none; width:54px; text-align:center; font-size:46px; line-height:1; font-weight:700; }
+  .card .ar svg { width:50px; height:50px; display:block; margin:auto; }
+  .card .m { font-size:23px; font-weight:800; line-height:1.1; }
+  .card .s { font-size:14px; opacity:.92; margin-top:3px; }
+  .then { position:absolute; left:10px; z-index:5; background:var(--green-dk); color:#fff; font-size:13px; font-weight:600; padding:16px 12px 6px; border-radius:0 0 12px 12px; }
+  .then.b { background:var(--blue-dk); }
+
+  .scene { position:relative; flex:1; min-height:420px; overflow:hidden; background:linear-gradient(#dfe6ee 0%, #e9ece4 26%, var(--map) 40%); }
+  /* the tilted 3D map lives in its own flat layer: Safari would otherwise draw its near edge over the figure */
+  .stage { position:absolute; inset:0; z-index:0; overflow:hidden; perspective:520px; perspective-origin:50% 0%; isolation:isolate; }
+  .ground { position:absolute; width:640px; height:1000px; left:50%; bottom:-90px; margin-left:-320px; transform:rotateX(60deg); transform-origin:320px 760px; }
+  .ground svg { width:640px; height:1000px; overflow:visible; }
+  #rot { transform-box:view-box; transform-origin:320px 760px; transition:transform .8s ease-in-out; }
+  #pan { transition:transform .3s linear; }
+  .fog { position:absolute; left:0; right:0; top:0; height:42%; background:linear-gradient(#e3e8ee 30%, rgba(238,240,233,0)); pointer-events:none; z-index:2; }
+  .fig { position:absolute; left:50%; bottom:145px; transform:translateX(-50%) translateZ(0); z-index:4; overflow:visible; }
+  .fig .limb { transform-box:view-box; }
+  .fig .legA, .fig .legB { transform-origin:35px 72px; }
+  .fig .armA, .fig .armB { transform-origin:35px 44px; }
+  .fig.walking .legA, .fig.walking .armB { animation:swing .55s ease-in-out infinite alternate; }
+  .fig.walking .legB, .fig.walking .armA { animation:swing .55s ease-in-out infinite alternate-reverse; }
+  .fig.stairs .legA, .fig.stairs .armB { animation:swingBig .7s ease-in-out infinite alternate; }
+  .fig.stairs .legB, .fig.stairs .armA { animation:swingBig .7s ease-in-out infinite alternate-reverse; }
+  .fig.stairs .body { animation:bob .35s ease-in-out infinite alternate; }
+  .fig.turning .body { animation:twist .6s ease-in-out infinite alternate; transform-origin:35px 70px; transform-box:view-box; }
+  @keyframes swing { from { transform:rotate(20deg); } to { transform:rotate(-20deg); } }
+  @keyframes swingBig { from { transform:rotate(32deg); } to { transform:rotate(-14deg); } }
+  @keyframes bob { from { transform:translateY(0); } to { transform:translateY(-5px); } }
+  @keyframes twist { from { transform:scaleX(1); } to { transform:scaleX(.75); } }
+  .act { position:absolute; z-index:4; background:#fff; border-radius:999px; padding:5px 11px; font-size:13px; font-weight:700; box-shadow:0 2px 6px rgba(0,0,0,.2); white-space:nowrap; left:calc(50% + 22px); bottom:196px; }
+  .act i { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--blue); margin-right:6px; vertical-align:1px; }
+  #labels { position:absolute; inset:0; z-index:5; pointer-events:none; transform:translateZ(1px); }
+  .ground { z-index:0; }
+  .mlabel { position:absolute; background:#fff; border-radius:999px; padding:3px 9px; font-size:11px; font-weight:700; box-shadow:0 1px 4px rgba(0,0,0,.2); white-space:nowrap; transform:translate(-50%,-130%); color:var(--blue-dk); transition:opacity .2s; }
+  .mlabel.grey { color:var(--ink2); }
+  .prog { position:absolute; left:10px; right:10px; bottom:10px; z-index:5; background:#fff; border-radius:14px; padding:9px 12px; box-shadow:0 2px 8px rgba(0,0,0,.18); display:flex; align-items:center; gap:10px; }
+  .prog b { font-size:15px; } .prog .small { white-space:nowrap; }
+  .bar { flex:1; height:7px; border-radius:4px; background:#e8eaed; overflow:hidden; }
+  .bar div { height:100%; width:0; background:var(--blue); transition:width .3s; }
+  #lost { position:absolute; inset:0; z-index:8; background:rgba(252,232,230,.96); color:var(--red); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; font-weight:600; }
+  #lost .big { font-size:22px; font-weight:800; margin-bottom:6px; }
+  .stop { position:absolute; right:16px; bottom:76px; z-index:7; }
+
+  /* on a computer (wide window) the map gets bigger; scroll down for the buttons */
+  @media (min-width:600px) { .scene { min-height:max(600px, 78vh); } }
+
+  /* ---------- bottom sheet ---------- */
+  .sheet { flex:none; background:#fff; border-radius:20px 20px 0 0; box-shadow:0 -2px 10px rgba(60,64,67,.2); padding:8px 12px calc(14px + env(safe-area-inset-bottom)); z-index:6; }
+  .grab { width:36px; height:4px; border-radius:2px; background:var(--line); margin:0 auto 10px; }
+  .btn { border:1px solid var(--line); background:#fff; border-radius:14px; padding:12px; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .btn:active { background:#f1f3f4; }
+  .big { width:100%; min-height:96px; background:var(--blue); color:#fff; border:0; flex-direction:column; gap:2px; font-size:22px; }
+  .big:active { background:var(--blue-dk); }
+  .big small { font-size:12px; font-weight:600; opacity:.9; letter-spacing:.04em; }
+  .big.flash { background:#0b8043; }
+  .r { display:flex; gap:8px; margin-top:8px; }
+  .r > * { flex:1; }
+  .ghost { border-radius:999px; padding:10px; font-size:14px; }
+  .blue { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .blue:active { background:var(--blue-dk); }
+  .warn { color:var(--amber); background:var(--amber-lt); border-color:#fde293; }
+  .redb { color:var(--red); background:var(--red-lt); border-color:#f6c7c3; }
+  .next { text-align:center; margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sh { display:flex; justify-content:space-between; align-items:center; }
+
+  /* ---------- pop-up chooser ---------- */
+  #pick { position:fixed; inset:0; z-index:30; background:rgba(32,33,36,.45); display:flex; align-items:flex-end; justify-content:center; }
+  #pick .box { width:100%; max-width:560px; background:#fff; border-radius:20px 20px 0 0; padding:14px 12px calc(16px + env(safe-area-inset-bottom)); max-height:80%; overflow:auto; }
+  #pick h3 { margin:0 0 4px; font-size:17px; }
+  #pick .opts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+  #pick .opts.one { grid-template-columns:1fr; }
+  #toast { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(20px + env(safe-area-inset-bottom)); background:#323232; color:#fff; padding:12px 18px; border-radius:8px; font-size:14px; display:none; z-index:40; max-width:90%; text-align:center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="top">
+    <div class="route" id="routeName">Burden Lounge → NOLOP</div>
+    <div class="stack">
+      <div class="lights"><span class="chip" id="linkChip">◌ …</span><span class="chip" id="imuChip">◌ IMU</span></div>
+      <span class="chip role hide" id="roleChip"></span>
+    </div>
+  </div>
+  <div id="imuDiag" class="hide"></div>
+
+  <!-- ================= SETUP ================= -->
+  <div id="setup">
+    <div class="face">
+      <svg viewBox="0 0 330 150" preserveAspectRatio="xMidYMid slice">
+        <rect width="330" height="150" fill="#dfe3d8"/>
+        <rect x="115" y="0" width="100" height="150" fill="#fff"/>
+        <text x="165" y="16" text-anchor="middle" font-size="10" font-weight="700" fill="#9aa0a6">HALLWAY</text>
+        <rect x="215" y="78" width="9" height="46" fill="#8d6e4f"/>
+        <path d="M215,78 A46,46 0 0 0 175,101" fill="none" stroke="#8d6e4f" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <rect x="226" y="62" width="104" height="78" fill="#e8f0fe"/>
+        <text x="278" y="98" text-anchor="middle" font-size="11" font-weight="700" fill="#174ea6">BURDEN</text>
+        <text x="278" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#174ea6">LOUNGE</text>
+        <text x="236" y="74" font-size="9" font-weight="700" fill="#8d6e4f">door</text>
+        <line x1="165" y1="118" x2="165" y2="44" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/>
+        <path d="M150,50 L165,30 L180,50 Z" fill="#1a73e8"/>
+        <circle cx="165" cy="118" r="11" fill="#1a73e8" stroke="#fff" stroke-width="3"/>
+        <text x="165" y="143" text-anchor="middle" font-size="10" font-weight="600" fill="#5f6368">you</text>
+      </svg>
+      <div class="txt"><b>Face this way</b><div class="small" id="startHint"></div></div>
+    </div>
+
+    <div class="lbl">ROLE</div>
+    <div class="seg" id="roleSeg">
+      <button data-role="expert">Expert</button>
+      <button data-role="corrector" class="on">Corrector</button>
+      <button data-role="new">New person</button>
+    </div>
+
+    <div id="corrSetup">
+      <div class="lbl">WHICH CORRECTOR?</div>
+      <div class="pills" id="corrPills"></div>
+      <button class="tog on" id="daggerTog">
+        <div><b>DAgger</b><div class="small" id="daggerTxt">Corrections are saved for training</div></div>
+        <div class="sw"></div>
+      </button>
+    </div>
+
+    <div class="lbl">HEIGHT</div>
+    <label class="inp"><input id="height" type="number" inputmode="numeric" min="100" max="230" placeholder="e.g. 172"><span class="small" style="font-size:15px">cm</span></label>
+    <div class="err" id="setupErr"></div>
+    <button class="pill" id="startBtn">▶ Start</button>
+    <div class="small" style="text-align:center;margin-top:8px">Sensor tight, just above the ankle bone. Stand still 2 s after Start.</div>
+  </div>
+
+  <!-- ================= WALKING ================= -->
+  <div id="walk" class="hide">
+    <div class="scene" id="scene">
+      <div class="stage"><div class="ground"><svg id="groundSvg" viewBox="0 0 640 1000">
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M40 0H0V40" fill="none" stroke="#e2e5dc" stroke-width="1.5"/>
+          </pattern>
+        </defs>
+        <rect x="-2000" y="-2000" width="4640" height="5000" fill="url(#grid)"/>
+        <g id="rot"><g id="pan"><g id="floorG"></g><g id="walkedG"></g></g></g>
+        <path d="M320,760 L282,670 A95,95 0 0 1 358,670 Z" fill="#1a73e8" opacity=".18"/>
+        <circle cx="320" cy="760" r="26" fill="#1a73e8" opacity=".25"/>
+      </svg></div></div>
+      <div class="fog"></div>
+      <div id="labels"></div>
+
+      <svg class="fig walking" id="fig" width="52" height="90" viewBox="0 0 70 120">
+        <ellipse cx="35" cy="113" rx="20" ry="6" fill="#000" opacity=".22"/>
+        <g class="body">
+          <g class="limb legB"><line x1="35" y1="72" x2="35" y2="108" stroke="#fff" stroke-width="13" stroke-linecap="round"/><line x1="35" y1="72" x2="35" y2="108" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/></g>
+          <g class="limb armB"><line x1="35" y1="44" x2="35" y2="68" stroke="#fff" stroke-width="13" stroke-linecap="round"/><line x1="35" y1="44" x2="35" y2="68" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/></g>
+          <line x1="35" y1="38" x2="35" y2="72" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+          <line x1="35" y1="38" x2="35" y2="72" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/>
+          <g class="limb legA"><line x1="35" y1="72" x2="35" y2="108" stroke="#fff" stroke-width="13" stroke-linecap="round"/><line x1="35" y1="72" x2="35" y2="108" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/></g>
+          <g class="limb armA"><line x1="35" y1="44" x2="35" y2="68" stroke="#fff" stroke-width="13" stroke-linecap="round"/><line x1="35" y1="44" x2="35" y2="68" stroke="#1a73e8" stroke-width="8" stroke-linecap="round"/></g>
+          <circle cx="35" cy="22" r="13" fill="#1a73e8" stroke="#fff" stroke-width="4"/>
+          <circle cx="31" cy="18" r="4" fill="#fff" opacity=".45"/>
+        </g>
+      </svg>
+      <div class="act" id="actChip"><i></i><span id="actTxt">Standing still</span></div>
+
+      <div class="prog">
+        <div><b id="progM">0 / 0 m</b><br><span class="small" id="progT"></span></div>
+        <div class="bar"><div id="progBar"></div></div>
+        <span class="small" id="progL"></span>
+      </div>
+      <button class="btn ghost redb stop hide" id="stopBtn">■ Stop</button>
+      <div id="lost" class="hide"><div class="big">✕ Connection to board lost</div><div>Stop and stand still until it reconnects. This gap is marked so it won't spoil the data.</div></div>
+    </div>
+
+    <div class="card" id="card"><div class="ar" id="cardAr"></div><div><div class="m" id="cardM"></div><div class="s" id="cardS"></div></div></div>
+    <div class="then hide" id="then"></div>
+
+    <!-- Expert -->
+    <div class="sheet hide" id="expertSheet"><div class="grab"></div>
+      <button class="btn big" id="tapBtn"><small>TAP AS YOU START</small><span id="tapTxt"></span></button>
+      <div class="small next" id="nextTxt"></div>
+      <div class="r"><button class="btn ghost" id="undoBtn">⌫ Undo</button><button class="btn ghost warn" data-pause>⏸ Pause</button><button class="btn ghost blue" data-arrived>⚑ Arrived</button></div>
+    </div>
+
+    <!-- Corrector -->
+    <div class="sheet hide" id="corrSheet"><div class="grab"></div>
+      <div class="sh"><span class="small" style="font-weight:700">SOMETHING WRONG?</span><span class="chip ok" id="daggerChip">DAgger ON</span></div>
+      <div class="r"><button class="btn" id="didBtn">🦶 Not what I did</button><button class="btn" id="sayBtn">✎ Wrong instruction</button></div>
+      <div class="r"><button class="btn" id="syncBtn">📍 Re-sync: I'm at…</button></div>
+      <div class="r"><button class="btn ghost warn" data-pause>⏸ Pause</button><button class="btn ghost blue" data-arrived>⚑ Arrived</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="pick" class="hide"><div class="box"><h3 id="pickTitle"></h3><div class="small" id="pickSub"></div><div class="opts" id="pickOpts"></div>
+  <div class="r"><button class="btn ghost" id="pickCancel">Cancel</button></div></div></div>
+<div id="toast"></div>
+
+<script>
+// ------------------------------------------------------------------
+// Built-in copy of python/route.json (the board can send a newer one)
+// ------------------------------------------------------------------
+let ROUTE = {
+  name: "Burden Lounge → NOLOP", start: "Burden Lounge", dest: "NOLOP",
+  start_hint: "Stand in the hallway next to the Burden Lounge door, with the door on your right. Face down the hallway.",
+  legs: [
+    { kind:"walk",   m:24.8, floor:0,  end:{ id:"left_turn_1",       type:"turn",         dir:"left", label:"Left turn 1" } },
+    { kind:"walk",   m:1.95, floor:0,  end:{ id:"stairs_down_start", type:"stairs_start", dir:"down", label:"Stairs down start" } },
+    { kind:"stairs", m:8.0,  floor:0,  dir:"down", steps:24, end:{ id:"stairs_down_end", type:"stairs_end", dir:"down", label:"Stairs down end" } },
+    { kind:"walk",   m:0.65, floor:-1, end:{ id:"left_turn_2",       type:"turn",         dir:"left", label:"Left turn 2" } },
+    { kind:"walk",   m:1.9,  floor:-1, end:{ id:"left_turn_3",       type:"turn",         dir:"left", label:"Left turn 3" } },
+    { kind:"walk",   m:10.0, floor:-1, end:{ id:"left_turn_4",       type:"turn",         dir:"left", label:"Left turn 4" } },
+    { kind:"walk",   m:1.18, floor:-1, end:{ id:"stairs_up_start",   type:"stairs_start", dir:"up",   label:"Stairs up start" } },
+    { kind:"stairs", m:1.1,  floor:-1, dir:"up", steps:4, end:{ id:"stairs_up_end", type:"stairs_end", dir:"up", label:"Stairs up end" } },
+    { kind:"walk",   m:3.8,  floor:-1, end:{ id:"arrived",           type:"arrive",       dir:"",     label:"NOLOP" } },
+  ],
+};
+
+const $ = id => document.getElementById(id);
+const S = 34, OX = 320, OY = 760;          // map: pixels per meter, where you stand on the ground
+const TILT = 60, PERSP = 520;              // must match the CSS above
+const ROLE_NAME = { expert:"Expert", corrector:"Corrector", new:"New person" };
+const NEAR_STEPS = 6;                      // farther than this: "Go straight" (same as navigator.py)
+
+// ---------- arrows ----------
+const ARROW = {
+  left:  '<svg viewBox="0 0 50 50"><path d="M38 46V20H14" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M18 11 6 20l12 9Z" fill="#fff"/></svg>',
+  right: '<svg viewBox="0 0 50 50"><path d="M12 46V20h24" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M32 11l12 9-12 9Z" fill="#fff"/></svg>',
+  straight: '<svg viewBox="0 0 50 50"><path d="M25 46V12" stroke="#fff" stroke-width="5"/><path d="M15 16 25 4l10 12Z" fill="#fff"/></svg>',
+  down: '<svg viewBox="0 0 50 50"><path d="M6 12h10v10h10v10h10v10h8" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/><path d="M14 30v12h12" fill="none" stroke="#fff" stroke-width="3"/></svg>',
+  up:   '<svg viewBox="0 0 50 50"><path d="M6 42h10V32h10V22h10V12h8" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/></svg>',
+  flag: '<svg viewBox="0 0 50 50"><path d="M14 46V6" stroke="#fff" stroke-width="5"/><path d="M16 8h24l-6 9 6 9H16Z" fill="#fff"/></svg>',
+};
+const SYM = { left:"↰", right:"↱", down:"⤵", up:"⤴", arrive:"⚑" };
+function lmSym(e){ return e.type === "arrive" ? SYM.arrive : SYM[e.dir] || ""; }
+
+// ---------- small helpers ----------
+function toast(m){ const t=$("toast"); t.textContent=m; t.style.display="block"; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display="none", 1800); }
+function buzz(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
+function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e){ return null; } }
+
+// ------------------------------------------------------------------
+// Route geometry: where every part of the route is on a flat map
+// (meters; start at 0,0 facing "north" = up; a left turn = -90 degrees)
+// ------------------------------------------------------------------
+let GEO = [];
+function buildGeo(){
+  let x = 0, y = 0, h = 0;
+  GEO = ROUTE.legs.map(leg => {
+    const r = h * Math.PI / 180, x2 = x + Math.sin(r) * leg.m, y2 = y - Math.cos(r) * leg.m;
+    const g = { x1:x, y1:y, x2, y2, h };
+    x = x2; y = y2;
+    if (leg.end.type === "turn") h += leg.end.dir === "left" ? -90 : 90;
+    return g;
+  });
+}
+function totalM(){ return ROUTE.legs.reduce((a, l) => a + l.m, 0); }
+function posOf(leg, d){
+  const g = GEO[leg], m = ROUTE.legs[leg].m, f = Math.max(0, Math.min(1, m ? d / m : 0));
+  return { x: g.x1 + (g.x2 - g.x1) * f, y: g.y1 + (g.y2 - g.y1) * f, h: g.h };
+}
+function onFloor(i, floor){ return ROUTE.legs[i].floor === floor; }
+
+// draw the hallway, route, stairs and turn dots for one floor (drawn once per floor)
+let drawnFloor = null;
+function drawFloor(floor){
+  if (drawnFloor === floor) return;
+  drawnFloor = floor;
+  const P = v => (v * S).toFixed(1);
+  let hall = "", line = "", extra = "", side = "";
+  ROUTE.legs.forEach((leg, i) => {
+    if (!onFloor(i, floor)) return;
+    const g = GEO[i];
+    const seg = `x1="${P(g.x1)}" y1="${P(g.y1)}" x2="${P(g.x2)}" y2="${P(g.y2)}"`;
+    hall += `<line ${seg} stroke="#fff" stroke-width="${2.1 * S}" stroke-linecap="square"/>`;
+    // simple "walls/rooms" along longer hallways, to give the 3D feel
+    if (leg.kind === "walk" && leg.m > 3){
+      const r = g.h * Math.PI / 180, nx = Math.cos(r), ny = Math.sin(r);       // sideways direction
+      for (const s of [-1, 1]){
+        const off = 1.05 + 1.6, w = 3.2;                                        // just beside the hallway
+        const ax = g.x1 + nx * off * s, ay = g.y1 + ny * off * s, bx = g.x2 + nx * off * s, by = g.y2 + ny * off * s;
+        side += `<line x1="${P(ax)}" y1="${P(ay)}" x2="${P(bx)}" y2="${P(by)}" stroke="#dfe3d8" stroke-width="${w * S}" stroke-dasharray="${5 * S} ${0.5 * S}"/>`;
+      }
+    }
+    if (leg.kind === "stairs"){
+      const n = Math.min(leg.steps, 24), dx = (g.x2 - g.x1) / n, dy = (g.y2 - g.y1) / n;
+      const r = g.h * Math.PI / 180, nx = Math.cos(r) * 0.9, ny = Math.sin(r) * 0.9;
+      extra += `<line ${seg} stroke="#c6cbd3" stroke-width="${1.8 * S}"/>`;
+      for (let k = 0; k <= n; k++){
+        const cx = g.x1 + dx * k, cy = g.y1 + dy * k;
+        extra += `<line x1="${P(cx - nx)}" y1="${P(cy - ny)}" x2="${P(cx + nx)}" y2="${P(cy + ny)}" stroke="#8e96a3" stroke-width="2.5"/>`;
+      }
+      extra += `<line ${seg} stroke="#1a73e8" stroke-width="9" stroke-dasharray="10 8"/>`;
+    } else {
+      line += `<line ${seg} stroke="#fff" stroke-width="17" stroke-linecap="round"/>`;
+      extra += `<line ${seg} stroke="#1a73e8" stroke-width="12" stroke-linecap="round"/>`;
+    }
+    if (leg.end.type === "turn") extra += `<circle cx="${P(g.x2)}" cy="${P(g.y2)}" r="9" fill="#fff" stroke="#174ea6" stroke-width="4"/>`;
+    if (leg.end.type === "arrive") extra += `<circle cx="${P(g.x2)}" cy="${P(g.y2)}" r="15" fill="#c5221f" stroke="#fff" stroke-width="5"/>`;
+  });
+  $("floorG").innerHTML = side + hall + line + extra;
+}
+
+// grey line over the part already walked (current floor only)
+function drawWalked(leg, d){
+  const floor = ROUTE.legs[leg].floor, P = v => (v * S).toFixed(1);
+  let pts = [];
+  for (let i = 0; i <= leg; i++){
+    if (!onFloor(i, floor) || ROUTE.legs[i].kind === "stairs") { pts = []; continue; }
+    const g = GEO[i];
+    if (!pts.length) pts.push([g.x1, g.y1]);
+    if (i < leg) pts.push([g.x2, g.y2]);
+    else { const p = posOf(leg, d); pts.push([p.x, p.y]); }
+  }
+  $("walkedG").innerHTML = pts.length > 1
+    ? `<polyline points="${pts.map(p => P(p[0]) + "," + P(p[1])).join(" ")}" fill="none" stroke="#9aa0a6" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>` : "";
+}
+
+// ------------------------------------------------------------------
+// Map camera: keep you at the same spot, walking direction always up
+// ------------------------------------------------------------------
+let camH = null;            // current map rotation (kept continuous so turns animate the short way)
+let lastCam = { x:0, y:0, rot:0 };
+function moveCamera(leg, d){
+  const p = posOf(leg, d);
+  if (camH === null) camH = p.h;
+  else { let diff = ((p.h - camH) % 360 + 540) % 360 - 180; camH += diff; }
+  const rot = -camH, tx = OX - p.x * S, ty = OY - p.y * S;
+  $("rot").style.transform = `rotate(${rot}deg)`;
+  $("pan").style.transform = `translate(${tx}px, ${ty}px)`;
+  lastCam = { x:p.x, y:p.y, rot };
+}
+
+// where a map point (meters) shows up on screen, for the little labels
+function project(mx, my){
+  const sc = $("scene"), W = sc.clientWidth, H = sc.clientHeight;
+  const r = lastCam.rot * Math.PI / 180;
+  let X = (mx - lastCam.x) * S, Y = (my - lastCam.y) * S;            // relative to you, in pixels
+  const Xr = X * Math.cos(r) - Y * Math.sin(r), Yr = X * Math.sin(r) + Y * Math.cos(r);
+  const a = TILT * Math.PI / 180, z = Yr * Math.sin(a);
+  const sx = W / 2 + Xr, sy = (H - 150) + Yr * Math.cos(a);
+  const k = PERSP / (PERSP - z);
+  return { x: W / 2 + (sx - W / 2) * k, y: sy * k, z };
+}
+function drawLabels(leg, d){
+  const floor = ROUTE.legs[leg].floor, out = [], placed = [];
+  let shown = 0;
+  for (let i = leg; i < ROUTE.legs.length && shown < 2; i++){
+    if (!onFloor(i, floor)) break;
+    const L = ROUTE.legs[i], g = GEO[i];
+    let dist = 0;
+    for (let j = leg; j <= i; j++) dist += ROUTE.legs[j].m;
+    dist -= Math.min(d, ROUTE.legs[leg].m);
+    let txt, px, py, cls = "";
+    if (L.kind === "stairs" && i === leg) continue;            // already on these stairs
+    if (L.kind === "stairs"){ txt = `Stairs ${L.dir} · ${L.steps}`; px = (g.x1 + g.x2) / 2; py = (g.y1 + g.y2) / 2; cls = "grey"; }
+    else if (L.end.type === "turn" || L.end.type === "arrive"){ txt = `${lmSym(L.end)} ${L.end.type === "arrive" ? ROUTE.dest : L.end.label} · ${dist.toFixed(1)} m`; px = g.x2; py = g.y2; }
+    else continue;
+    const s = project(px, py);
+    while (placed.some(q => Math.abs(q.y - s.y) < 24 && Math.abs(q.x - s.x) < 130)) s.y += 26;   // don't overlap
+    placed.push(s);
+    const th = $("then"), top = (th.classList.contains("hide") ? $("card").offsetTop + $("card").offsetHeight : th.offsetTop + th.offsetHeight) + 30;
+    if (s.y > top && s.y < $("scene").clientHeight - 80) out.push(`<div class="mlabel ${cls}" style="left:${s.x.toFixed(0)}px;top:${s.y.toFixed(0)}px">${txt}</div>`);
+    shown++;
+  }
+  $("labels").innerHTML = out.join("");
+}
+
+// ------------------------------------------------------------------
+// What to tell the walker (the board may send its own words instead)
+// ------------------------------------------------------------------
+function instruction(st){
+  const L = ROUTE.legs, i = Math.min(st.leg || 0, L.length - 1), leg = L[i], e = leg.end;
+  const left = Math.max(0, leg.m - (st.d || 0));
+  const steps = st.steps_to != null ? st.steps_to : Math.round(left / 0.7);
+  let ar, m, s = "", then = null;
+  if (st.at_end || (e.type === "arrive" && left < 0.5)) return { ar:"flag", m:"You have arrived", s:`Welcome to ${ROUTE.dest}`, then:null };
+  if (leg.kind === "stairs"){
+    ar = leg.dir; m = `Go ${leg.dir} the stairs`; s = `${leg.steps} steps`;
+    const nx = L[i + 1];
+    if (nx && nx.kind === "walk"){            // after the stairs: a few steps forward first
+      const n = Math.max(1, Math.round(nx.m / 0.65)), fwd = `${n} step${n > 1 ? "s" : ""} forward`;
+      const endWord = leg.dir === "down" ? "bottom" : "top";
+      if (nx.end.type === "turn" && nx.m < 3){
+        if (leg.m - (st.d || 0) < 1) return { ar:"straight", m:`At the ${endWord}: ${fwd}, then turn ${nx.end.dir}`, s:"", then:null };
+        return { ar, m, s, then:`Then: ${fwd}, then turn ${SYM[nx.end.dir]} ${nx.end.dir}` };
+      }
+      if (nx.end.type === "arrive") return { ar, m, s, then:`Then: ~${n} steps straight to ${ROUTE.dest}` };
+    }
+  } else if (e.type === "turn"){
+    ar = e.dir; m = steps < 1 ? `Turn ${e.dir}` : `Turn ${e.dir} in ~${steps} step${steps === 1 ? "" : "s"}`;
+    if (steps > NEAR_STEPS) return { ar:"straight", m:"Go straight", s:`${SYM[e.dir]} Turn ${e.dir} in ~${steps} steps`, then:null };
+  } else if (e.type === "stairs_start"){
+    ar = e.dir; m = steps < 1 ? `Take the stairs ${e.dir}` : `Stairs ${e.dir} in ~${steps} step${steps === 1 ? "" : "s"}`;
+    if (steps > NEAR_STEPS) return { ar:"straight", m:"Go straight", s:`${SYM[e.dir]} Stairs ${e.dir} in ~${steps} steps`, then:null };
+  } else {
+    ar = "straight"; m = steps <= 1 ? `${ROUTE.dest} is right here` : `${ROUTE.dest} in ~${steps} steps`; s = "keep going straight";
+  }
+  // a second instruction coming right after this one
+  const nx = L[i + 1];
+  if (nx && (nx.m < 3 || leg.kind === "stairs")){
+    const ne = nx.kind === "stairs" ? { type:"stairs", dir:nx.dir } : nx.end;
+    if (ne.type === "turn") then = `Then ${SYM[ne.dir]} turn ${ne.dir}${e.type === "turn" && e.dir === ne.dir ? " again" : ""}`;
+    else if (ne.type === "stairs" || ne.type === "stairs_start") then = `Then ${SYM[ne.dir]} stairs ${ne.dir}`;
+    else if (ne.type === "arrive") then = `Then ${ROUTE.dest}`;
+  }
+  return { ar, m, s, then };
+}
+
+// ------------------------------------------------------------------
+// State + drawing the screen
+// ------------------------------------------------------------------
+let st = { status:"idle" };
+let role = store("gm_role") || "corrector", corr = +(store("gm_corr") || 1), dagger = store("gm_dagger") !== "0";
+let nCorr = Math.max(3, corr);
+
+function renderSetup(){
+  document.querySelectorAll("#roleSeg button").forEach(b => b.classList.toggle("on", b.dataset.role === role));
+  $("corrSetup").classList.toggle("hide", role !== "corrector");
+  let h = "";
+  for (let k = 1; k <= nCorr; k++) h += `<button data-c="${k}" class="${k === corr ? "on" : ""}">${k}</button>`;
+  $("corrPills").innerHTML = h + `<button data-c="+">+</button>`;
+  $("daggerTog").classList.toggle("on", dagger);
+  $("daggerTxt").textContent = dagger ? "Corrections are saved for training" : "Test run: nothing is used for training";
+}
+
+function render(){
+  const active = st.status && st.status !== "idle";
+  $("setup").classList.toggle("hide", active);
+  $("walk").classList.toggle("hide", !active);
+  $("roleChip").classList.toggle("hide", !active);
+  if (!active){ renderSetup(); camH = null; drawnFloor = null; return; }
+
+  const r = st.role || role;
+  $("roleChip").textContent = r === "corrector" ? `Corrector ${st.corrector || corr}` : ROLE_NAME[r];
+  $("expertSheet").classList.toggle("hide", r !== "expert");
+  $("corrSheet").classList.toggle("hide", r !== "corrector");
+  $("stopBtn").classList.toggle("hide", r !== "new");
+  $("daggerChip").textContent = st.dagger ? "DAgger ON" : "DAgger OFF (test)";
+  $("daggerChip").className = "chip " + (st.dagger ? "ok" : "warn");
+
+  // instruction card
+  const card = $("card"), then = $("then");
+  card.className = "card"; then.className = "then hide";
+  if (st.status === "calibrating"){
+    card.classList.add("grey"); $("cardAr").textContent = "◌"; $("cardM").textContent = "Hold still"; $("cardS").textContent = "Calibrating the sensor…";
+  } else if (st.paused){
+    card.classList.add("amber"); $("cardAr").textContent = "⏸"; $("cardM").textContent = "Paused"; $("cardS").textContent = "Doors and waiting are ignored. Tap Resume.";
+  } else if (st.missed && r !== "expert"){
+    card.classList.add("red"); $("cardAr").innerHTML = ARROW.straight.replace('d="M25 46V12"', 'd="M25 46V12" transform="rotate(180 25 25)"');
+    $("cardM").textContent = "You may have passed the turn"; $("cardS").textContent = r === "corrector" ? "Go back, or tap Re-sync" : "Go back to the last corner";
+  } else if (r === "expert"){
+    card.classList.add("b"); $("cardAr").textContent = "●"; $("cardM").textContent = "Recording expert walk"; $("cardS").textContent = "Walk normally · tap each landmark as it starts";
+  } else {
+    const ins = st.say ? { ar: st.ar || "straight", m: st.say, s: st.sub || "", then: st.then || null } : instruction(st);
+    $("cardAr").innerHTML = ARROW[ins.ar] || ARROW.straight;
+    $("cardM").textContent = ins.m; $("cardS").textContent = ins.s;
+    if (ins.then){ then.textContent = ins.then; then.classList.remove("hide"); }
+    if (ins.ar !== render.lastAr){ if (render.lastAr) buzz([120, 60, 120]); render.lastAr = ins.ar; }   // vibrate when the arrow changes
+  }
+  // "then" strip sits right under the card
+  then.style.top = (card.offsetTop + card.offsetHeight) + "px";
+
+  // map + figure
+  const leg = Math.min(st.leg || 0, ROUTE.legs.length - 1), d = st.d || 0;
+  drawFloor(ROUTE.legs[leg].floor);
+  moveCamera(leg, d);
+  drawWalked(leg, d);
+  drawLabels(leg, d);
+  const act = st.status === "calibrating" ? "Standing still" : (st.activity || "Standing still");
+  $("actTxt").textContent = act;
+  $("fig").setAttribute("class", "fig " + (/stairs/i.test(act) ? "stairs" : /Turning/.test(act) ? "turning walking" : /Walking/.test(act) ? "walking" : ""));
+
+  // progress
+  const tot = st.total_m || totalM();
+  let done = st.progress_m;
+  if (done == null){ done = 0; for (let i = 0; i < leg; i++) done += ROUTE.legs[i].m; done += Math.min(d, ROUTE.legs[leg].m); }
+  $("progM").textContent = `${Math.round(done)} / ${Math.round(tot)} m`;
+  const secs = Math.max(0, tot - done) / 1.2;
+  $("progT").textContent = st.at_end ? "arrived" : secs < 45 ? "less than 1 min left" : `about ${Math.round(secs / 60)} min left`;
+  $("progBar").style.width = Math.min(100, 100 * done / tot) + "%";
+  const lmIdx = r === "expert" ? (st.expert_next || 0) : leg;
+  $("progL").textContent = `Landmark ${Math.min(lmIdx + 1, ROUTE.legs.length)} of ${ROUTE.legs.length}`;
+
+  // expert button: the next landmark to tap
+  if (r === "expert"){
+    const k = Math.min(st.expert_next || 0, ROUTE.legs.length - 1), e = ROUTE.legs[k].end;
+    $("tapTxt").textContent = e.type === "arrive" ? `⚑ ARRIVED AT ${ROUTE.dest.toUpperCase()}` : `${lmSym(e)} ${e.label.toUpperCase()}`;
+    $("tapBtn").querySelector("small").textContent = e.type === "arrive" ? "TAP WHEN YOU STOP" : "TAP AS YOU START";
+    const after = ROUTE.legs.slice(k + 1, k + 4).map(l => `${lmSym(l.end)} ${l.end.label}`);
+    $("nextTxt").textContent = after.length ? "Next: " + after.join(" · ") : "Last one!";
+  }
+  document.querySelectorAll("[data-pause]").forEach(b => b.textContent = st.paused ? "▶ Resume" : "⏸ Pause");
+}
+
+// ------------------------------------------------------------------
+// Pop-up chooser (corrector buttons)
+// ------------------------------------------------------------------
+function pick(title, sub, options, cb, oneCol){
+  $("pickTitle").textContent = title; $("pickSub").textContent = sub;
+  $("pickOpts").className = "opts" + (oneCol ? " one" : "");
+  $("pickOpts").innerHTML = options.map((o, i) => `<button class="btn" data-i="${i}">${o.label}</button>`).join("");
+  $("pickOpts").querySelectorAll("button").forEach(b => b.onclick = () => { $("pick").classList.add("hide"); cb(options[+b.dataset.i]); });
+  $("pick").classList.remove("hide");
+}
+$("pickCancel").onclick = () => $("pick").classList.add("hide");
+$("pick").onclick = e => { if (e.target.id === "pick") $("pick").classList.add("hide"); };
+
+$("didBtn").onclick = () => pick("What did you actually do?", "This fixes the movement detector.", [
+  { v:"straight", label:"↑ Walked straight" }, { v:"still", label:"■ Stood still" },
+  { v:"left", label:"↰ Turned left" }, { v:"right", label:"↱ Turned right" },
+  { v:"stairs_down", label:"⤵ Went down stairs" }, { v:"stairs_up", label:"⤴ Went up stairs" },
+], o => { send("correct", { kind:"did", value:o.v }); toast("Saved: " + o.label.slice(2)); buzz(40); });
+
+$("sayBtn").onclick = () => pick("What should it have said?", "This fixes the instructions.", [
+  { v:"straight", label:"↑ Go straight" }, { v:"arrive", label:"⚑ You've arrived" },
+  { v:"left", label:"↰ Turn left" }, { v:"right", label:"↱ Turn right" },
+  { v:"stairs_down", label:"⤵ Stairs down" }, { v:"stairs_up", label:"⤴ Stairs up" },
+], o => { send("correct", { kind:"say", value:o.v }); toast("Saved: " + o.label.slice(2)); buzz(40); });
+
+$("syncBtn").onclick = () => pick("Where are you right now?", "Pick the landmark you just reached.",
+  ROUTE.legs.map((l, i) => ({ v:i, label:`${lmSym(l.end)} ${l.end.type === "arrive" ? "At " + ROUTE.dest : l.end.label}` })),
+  o => { send("resync", { idx:o.v }); toast("Re-synced"); buzz(40); }, true);
+
+// ------------------------------------------------------------------
+// Setup + walking buttons
+// ------------------------------------------------------------------
+$("roleSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; role = b.dataset.role; store("gm_role", role); renderSetup(); };
+$("corrPills").onclick = e => { const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.c === "+") { nCorr++; corr = nCorr; } else corr = +b.dataset.c;
+  store("gm_corr", corr); renderSetup(); };
+$("daggerTog").onclick = () => { dagger = !dagger; store("gm_dagger", dagger ? "1" : "0"); renderSetup(); };
+$("height").value = store("gm_height") || "";
+$("height").oninput = () => $("setupErr").textContent = "";
+
+$("startBtn").onclick = () => {
+  const h = +$("height").value;
+  if (!h || h < 100 || h > 230){ $("setupErr").textContent = "Enter a height between 100 and 230 cm."; return; }
+  store("gm_height", h);
+  send("start", { role, corrector: role === "corrector" ? corr : 0, dagger: role === "corrector" ? dagger : false, height: h });
+  buzz(80);
+};
+
+$("tapBtn").onclick = () => {
+  const k = st.expert_next || 0;
+  send("tap", { idx:k }); buzz(30);
+  const b = $("tapBtn"); b.classList.add("flash"); setTimeout(() => b.classList.remove("flash"), 350);
+};
+$("undoBtn").onclick = () => { send("undo", {}); buzz(20); };
+document.querySelectorAll("[data-pause]").forEach(b => b.onclick = () => { send("pause", {}); buzz(50); });
+function finish(){
+  pick("Walk finished", "Save this walk?", [ { v:true, label:"✓ Save" }, { v:false, label:"✕ Discard" } ],
+       o => { send("stop", { keep:o.v }); toast(o.v ? "Walk saved" : "Walk discarded"); });
+}
+document.querySelectorAll("[data-arrived]").forEach(b => b.onclick = finish);
+$("stopBtn").onclick = finish;
+
+// ------------------------------------------------------------------
+// Connection to the board (or a fake walk when opened as a file)
+// ------------------------------------------------------------------
+const live = location.protocol.startsWith("http") && typeof io !== "undefined";
+const socket = live ? io(`http://${location.host}`) : null;
+function send(ev, data){ if (socket) socket.emit(ev, data); else demo(ev, data); }
+
+let lastHb = 0, imuOk = false, imuDiag = "", wasLinked = null;
+function updateLink(){
+  const linked = live && lastHb && Date.now() - lastHb < 3000;
+  const lc = $("linkChip"), ic = $("imuChip");
+  if (!live){ lc.className = "chip warn"; lc.textContent = "◌ Preview"; ic.className = "chip"; ic.textContent = "◌ IMU"; }
+  else {
+    lc.className = "chip " + (linked ? "ok" : "bad"); lc.textContent = linked ? "● Live" : "✕ No link";
+    ic.className = "chip " + (!linked ? "" : imuOk ? "ok" : "bad"); ic.textContent = (linked && imuOk ? "● " : "✕ ") + "IMU";
+  }
+  $("imuDiag").textContent = "IMU: " + imuDiag;
+  $("imuDiag").classList.toggle("hide", !(linked && !imuOk));
+  $("lost").classList.toggle("hide", !(live && !linked && st.status === "active"));
+  if (wasLinked === true && !linked){ buzz([300, 100, 300]); toast("✕ Lost connection to board"); }
+  if (wasLinked === false && linked) toast("● Connected");
+  wasLinked = !!linked;
+}
+setInterval(updateLink, 500);
+
+if (socket){
+  setInterval(() => { if (socket.connected) socket.emit("ping", {}); }, 1000);
+  socket.on("hb", m => { lastHb = Date.now(); imuOk = !!m.imu_ok; imuDiag = m.imu_diag || ""; updateLink(); });
+  socket.on("route", r => { if (r && r.legs){ ROUTE = r; buildGeo(); drawnFloor = null; setText(); render(); } });
+  socket.on("state", m => {
+    if (st.status === "idle" && m.status !== "idle") render.lastAr = null;
+    st = m;
+    if (m.toast) toast(m.toast);
+    render();
+  });
+}
+
+// ---------- preview mode: fakes a walk so you can see the screens without the board ----------
+let demoTimer = null;
+function demo(ev, data){
+  if (ev === "start"){
+    st = { status:"calibrating", role:data.role, corrector:data.corrector, dagger:data.dagger, leg:0, d:0, expert_next:0, activity:"Standing still" };
+    render();
+    clearInterval(demoTimer);
+    setTimeout(() => { st.status = "active"; st.activity = "Walking straight"; render(); }, 1200);
+    demoTimer = setInterval(() => {
+      if (st.status !== "active" || st.paused || st.at_end) return;
+      const L = ROUTE.legs[st.leg];
+      st.d += 0.25;
+      st.activity = L.kind === "stairs" ? `Going ${L.dir} stairs` : "Walking straight";
+      if (st.d >= L.m){
+        if (L.end.type === "arrive"){ st.at_end = true; st.activity = "Standing still"; }
+        else { st.leg++; st.d = 0; if (L.end.type === "turn") st.activity = `Turning ${L.end.dir}`; }
+      }
+      if (st.role === "expert") st.expert_next = Math.max(st.expert_next, st.leg);
+      render();
+    }, 200);
+    return;
+  }
+  if (ev === "pause"){ st.paused = !st.paused; render(); }
+  if (ev === "tap"){ st.expert_next = Math.min(data.idx + 1, ROUTE.legs.length - 1); render(); }
+  if (ev === "undo"){ st.expert_next = Math.max(0, (st.expert_next || 0) - 1); render(); }
+  if (ev === "resync"){ st.leg = Math.min(data.idx + 1, ROUTE.legs.length - 1); st.d = 0; render(); }
+  if (ev === "stop"){ clearInterval(demoTimer); st = { status:"idle" }; render(); }
+}
+
+// ------------------------------------------------------------------
+function setText(){ $("routeName").textContent = `${ROUTE.start} → ${ROUTE.dest}`; document.title = $("routeName").textContent; $("startHint").textContent = ROUTE.start_hint || ""; }
+buildGeo(); setText(); render(); updateLink();
+
+// preview shortcut for testing: index.html?demo=corrector&leg=0&d=18
+const q = new URLSearchParams(location.search);
+if (!live && q.get("demo")){
+  role = q.get("demo"); $("height").value = 172; $("startBtn").click();
+  clearInterval(demoTimer);
+  Object.assign(st, { status:"active", leg:+(q.get("leg") || 0), d:+(q.get("d") || 0), activity:q.get("act") || "Walking straight", corrector:2, dagger:true, expert_next:+(q.get("leg") || 0) });
+  render();
+}
+</script>
+</body>
+</html>

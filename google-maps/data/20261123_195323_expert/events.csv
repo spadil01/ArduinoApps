@@ -1,0 +1,68 @@
+t_ms,source,type,value,leg,d,action,route_action,say,extra
+1795463606286,app,calibrated,,0,0.0,,,,
+1795463608748,detector,stride,down,0,0.0,,,,"{""dz"": -0.281, ""dur"": 2.08, ""peak"": 186}"
+1795463609787,detector,stride,down,0,1.54,,,,"{""dz"": -0.466, ""dur"": 1.04, ""peak"": 377}"
+1795463610827,detector,stride,down,0,3.07,,,,"{""dz"": -0.326, ""dur"": 0.7, ""peak"": 383}"
+1795463611866,detector,stride,flat,0,4.61,,,,"{""dz"": -0.045, ""dur"": 0.96, ""peak"": 386}"
+1795463612907,detector,stride,flat,0,6.14,,,,"{""dz"": -0.071, ""dur"": 1.1, ""peak"": 381}"
+1795463613966,detector,stride,flat,0,7.68,,,,"{""dz"": -0.056, ""dur"": 1.44, ""peak"": 385}"
+1795463615006,detector,stride,down,0,9.21,,,,"{""dz"": -0.295, ""dur"": 0.6, ""peak"": 407}"
+1795463616066,detector,stride,flat,0,10.75,,,,"{""dz"": -0.005, ""dur"": 1.04, ""peak"": 411}"
+1795463617126,detector,stride,flat,0,12.28,,,,"{""dz"": -0.008, ""dur"": 1.06, ""peak"": 393}"
+1795463618165,detector,stride,flat,0,13.82,,,,"{""dz"": 0.077, ""dur"": 0.8, ""peak"": 393}"
+1795463619185,detector,stride,flat,0,15.35,,,,"{""dz"": -0.095, ""dur"": 1.7, ""peak"": 407}"
+1795463620204,detector,stride,down,0,16.89,,,,"{""dz"": -0.499, ""dur"": 1.02, ""peak"": 403}"
+1795463621305,detector,stride,down,0,18.43,,,,"{""dz"": -0.43, ""dur"": 1.12, ""peak"": 391}"
+1795463622401,detector,stride,down,0,19.96,,,,"{""dz"": -0.499, ""dur"": 1.08, ""peak"": 368}"
+1795463622783,expert,tap,left_turn_1,0,21.5,,,,
+1795463622784,tracker,landmark,left_turn_1,1,0.0,,,,"{""how"": ""expert tap""}"
+1795463623530,detector,turn,left,1,0.0,,,,"{""deg"": 51}"
+1795463623551,detector,stride,flat,1,0.0,,,,"{""dz"": -0.185, ""dur"": 0.38, ""peak"": 363}"
+1795463624365,expert,tap,stairs_down_start,1,1.7,,,,
+1795463624368,tracker,landmark,stairs_down_start,2,0.0,,,,"{""how"": ""expert tap""}"
+1795463624621,detector,stride,flat,2,0.0,,,,"{""dz"": -0.076, ""dur"": 1.48, ""peak"": 325}"
+1795463625671,detector,stride,down,2,0.67,,,,"{""dz"": -0.242, ""dur"": 1.08, ""peak"": 312}"
+1795463626641,detector,stride,down,2,1.33,,,,"{""dz"": -0.401, ""dur"": 1.02, ""peak"": 343}"
+1795463627591,detector,stride,down,2,2.0,,,,"{""dz"": -0.39, ""dur"": 0.94, ""peak"": 332}"
+1795463628542,detector,stride,down,2,2.67,,,,"{""dz"": -0.428, ""dur"": 0.92, ""peak"": 328}"
+1795463629473,detector,stride,down,2,3.33,,,,"{""dz"": -0.401, ""dur"": 0.94, ""peak"": 326}"
+1795463630465,detector,stride,down,2,4.0,,,,"{""dz"": -0.419, ""dur"": 1.04, ""peak"": 307}"
+1795463631437,detector,stride,down,2,4.67,,,,"{""dz"": -0.398, ""dur"": 0.94, ""peak"": 307}"
+1795463632470,detector,stride,down,2,5.33,,,,"{""dz"": -0.43, ""dur"": 1.06, ""peak"": 315}"
+1795463633443,detector,stride,flat,2,6.0,,,,"{""dz"": -0.094, ""dur"": 1.38, ""peak"": 325}"
+1795463634659,detector,stride,down,2,6.67,,,,"{""dz"": -0.311, ""dur"": 0.7, ""peak"": 370}"
+1795463635713,detector,stride,down,2,7.33,,,,"{""dz"": -0.432, ""dur"": 1.18, ""peak"": 299}"
+1795463636788,detector,stride,down,2,8.0,,,,"{""dz"": -0.422, ""dur"": 1.06, ""peak"": 312}"
+1795463637149,expert,tap,stairs_down_end,2,8.0,,,,
+1795463637154,tracker,landmark,stairs_down_end,3,0.0,,,,"{""how"": ""expert tap""}"
+1795463638046,expert,tap,left_turn_2,3,0.0,,,,
+1795463638056,tracker,landmark,left_turn_2,4,0.0,,,,"{""how"": ""expert tap""}"
+1795463638107,detector,stride,down,4,0.0,,,,"{""dz"": -0.407, ""dur"": 1.06, ""peak"": 296}"
+1795463638419,detector,turn,left,4,1.7,,,,"{""deg"": 51}"
+1795463639406,detector,stride,flat,4,1.7,,,,"{""dz"": -0.136, ""dur"": 1.42, ""peak"": 292}"
+1795463639799,expert,tap,left_turn_3,4,1.9,,,,
+1795463639819,tracker,landmark,left_turn_3,5,0.0,,,,"{""how"": ""expert tap""}"
+1795463640644,detector,stride,flat,5,0.0,,,,"{""dz"": -0.148, ""dur"": 1.24, ""peak"": 319}"
+1795463640745,detector,turn,left,5,1.7,,,,"{""deg"": 141}"
+1795463641781,detector,stride,flat,5,1.7,,,,"{""dz"": -0.121, ""dur"": 1.66, ""peak"": 335}"
+1795463642918,detector,stride,down,5,3.39,,,,"{""dz"": -0.333, ""dur"": 0.76, ""peak"": 367}"
+1795463644015,detector,stride,flat,5,5.09,,,,"{""dz"": -0.184, ""dur"": 1.48, ""peak"": 365}"
+1795463645132,detector,stride,down,5,6.79,,,,"{""dz"": -0.291, ""dur"": 0.66, ""peak"": 386}"
+1795463646271,detector,stride,flat,5,8.49,,,,"{""dz"": -0.016, ""dur"": 1.22, ""peak"": 382}"
+1795463647429,detector,stride,flat,5,10.0,,,,"{""dz"": 0.001, ""dur"": 1.12, ""peak"": 345}"
+1795463647434,expert,tap,left_turn_4,5,10.0,,,,
+1795463647474,tracker,landmark,left_turn_4,6,0.0,,,,"{""how"": ""expert tap""}"
+1795463647612,detector,turn,left,6,0.0,,,,"{""deg"": 51}"
+1795463648695,expert,tap,stairs_up_start,6,0.0,,,,
+1795463648775,tracker,landmark,stairs_up_start,7,0.0,,,,"{""how"": ""expert tap""}"
+1795463648777,detector,stride,flat,7,0.0,,,,"{""dz"": 0.039, ""dur"": 0.82, ""peak"": 275}"
+1795463649990,detector,stride,down,7,0.55,,,,"{""dz"": -0.264, ""dur"": 2.16, ""peak"": 207}"
+1795463651352,detector,stride,down,7,1.1,,,,"{""dz"": -0.464, ""dur"": 0.76, ""peak"": 181}"
+1795463651657,expert,tap,stairs_up_end,7,1.1,,,,
+1795463651791,tracker,landmark,stairs_up_end,8,0.0,,,,"{""how"": ""expert tap""}"
+1795463652694,detector,stride,flat,8,0.0,,,,"{""dz"": 0.021, ""dur"": 1.92, ""peak"": 289}"
+1795463653934,detector,stride,down,8,1.5,,,,"{""dz"": -0.316, ""dur"": 0.8, ""peak"": 320}"
+1795463655196,detector,stride,flat,8,3.01,,,,"{""dz"": -0.134, ""dur"": 1.72, ""peak"": 324}"
+1795463655223,expert,tap,arrived,8,3.8,,,,
+1795463655432,tracker,landmark,arrived,8,3.8,,,,"{""how"": ""expert tap""}"
+1795463656530,app,stop,keep,8,3.8,,,,
